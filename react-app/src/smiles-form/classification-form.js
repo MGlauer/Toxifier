@@ -15,11 +15,11 @@ import Chip from '@mui/material/Chip';
 import DeleteIcon from '@mui/icons-material/DeleteOutlined';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import LightbulbIcon from '@mui/icons-material/Lightbulb';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Close';
 import StartIcon from '@mui/icons-material/Start';
 import Modal from '@mui/material/Modal';
+import Link from '@mui/material/Link';
 
 import {
     GridRowModes,
@@ -215,7 +215,7 @@ export default function ClassificationGrid() {
           return  <Alert severity="error">Could not process input!</Alert>
         } else {
             return <Box sx={{ display: 'flex', flexWrap: 'wrap' }}>
-                {(data.map((x) => <Chip component="a" href={"http://purl.obolibrary.org/obo/" + x.replace(":", "_")} label={hierarchy[x].label} clickable target="_blank"/>))}
+                    <Typography> {data? (data.map((x) => hierarchy[x]).join(", "))} </Typography>
                 </Box>
         }
     };
@@ -279,29 +279,31 @@ export default function ClassificationGrid() {
                         label="Delete"
                         onClick={handleDeleteClick(id)}
                         color="inherit"
-                    />,
-                    <GridActionsCellItem
-                        icon={<LightbulbIcon/>}
-                        label="Details"
-                        onClick={handleOpen(id)}
-                        color="inherit"
-                        disabled={!wasPredicted}
-                    />,
+                    />,,
                 ];
             },
         },
     ];
 
     const getLabel = (x) => {
-        return hierarchy[x]["label"]
+        return hierarchy[x]
     }
 
     return (
         <Box sx={{width: "100%"}}>
             <Box>
-                <h1>Chebifier</h1>
+                <h1>Toxifier</h1>
                 Classify chemical structures using AI.
             </Box>
+
+            <Typography>
+            <hr />
+            <b>Trained on Tox21 Dataset from Molecule Net:</b> <br />
+Our system has undergone training on the <Link href="https://moleculenet.org/datasets-1">Tox21 dataset</Link> from the Molecule Net project. The Tox21 dataset contains valuable data encompassing a diverse array of chemical compounds and their associated toxicity labels. Leveraging this information, our system is primed to provide predictions regarding the <Link href="https://tripod.nih.gov/tox21/challenge/data.jsp">twelve kinds of toxicity</Link> considered in this dataset. It's important to note that the Tox21 system is specifically tailored for organic chemicals. <br /><br />
+<b>Limitations to Keep in Mind:</b><br />
+
+While our service is a useful tool, it's essential to acknowledge its limitations. The Tox21 dataset is limited in size and scope. If you're dealing with chemicals, we recommend exercising caution and, if necessary, consulting additional resources or conducting further research.<br /><br />
+        </Typography>
             <Paper sx={{width: "100%"}}>
                 <Box
                     sx={{

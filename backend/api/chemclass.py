@@ -3,7 +3,6 @@ from flask_restful import Api, Resource, reqparse
 from chebai.models.electra import Electra
 from chebai.preprocessing.reader import ChemDataReader, EMBEDDING_OFFSET
 from chebai.preprocessing.collate import RaggedCollater
-from chebai.result.molplot import AttentionMolPlot, AttentionNetwork
 from tempfile import NamedTemporaryFile
 from PIL import Image
 import base64
@@ -15,7 +14,7 @@ import matplotlib as mpl
 import json
 import networkx as nx
 from rdkit import Chem
-from rdkit.Chem.Draw import rdMolDraw2D
+#from rdkit.Chem.Draw import rdMolDraw2D
 import torch
 mpl.use("TkAgg")
 
@@ -29,33 +28,19 @@ BATCH_SIZE = app.config.get("BATCH_SIZE", 100)
 electra_model = Electra.load_from_checkpoint(app.config["ELECTRA_CHECKPOINT"], map_location=torch.device(device), pretrained_checkpoint=None, criterion=None, strict=False, metrics=dict(train=dict(), test=dict(), validation=dict()))
 electra_model.eval()
 
-PREDICTION_HEADERS = ["CHEBI:" + r.strip() for r in open(app.config["CLASS_HEADERS"])]
-LABEL_HIERARCHY = json.load(open(app.config["CHEBI_JSON"]))
-
-def load_sub_ontology():
-    g = nx.DiGraph()
-    g.add_nodes_from([(c["ID"], dict(lbl=c["LABEL"][0])) for c in LABEL_HIERARCHY])
-    g.add_edges_from([(t, c["ID"]) for c in LABEL_HIERARCHY for t in c.get("SubClasses",[])])
-    return g
-
-CHEBI_FRAGMENT = load_sub_ontology()
+PREDICTION_HEADERS = [r.strip() for r in open(app.config["CLASS_HEADERS"])] + ["No prediction"]
 
 
 def get_relevant_chebi_fragment(predictions, smiles, labels=None):
-    fragment_graph = CHEBI_FRAGMENT.copy()
-    predicted_subsumtions = [(i, h) for i in range(predictions.shape[0]) for h, p in zip(PREDICTION_HEADERS, predictions[i].tolist()) if p >= 0]
-    fragment_graph.add_edges_from(predicted_subsumtions)
-    necessary_nodes = set()
+    d = dict()
     for i in range(predictions.shape[0]):
-        fragment_graph.nodes[i]["lbl"] = labels[i] if labels else smiles[i]
-        fragment_graph.nodes[i]["artificial"] = True
-        necessary_nodes = necessary_nodes.union(set(nx.shortest_path(fragment_graph, i)))
-    sub = nx.transitive_reduction(fragment_graph.subgraph(necessary_nodes))
+        l = [j for j in range(predictions.shape[1]) if predictions[i,j] >= 0]
+        if l:
+          d[i] = l
+        else:
+          d[i] = [len(PREDICTION_HEADERS)-1]
+    return d
 
-    # Copy node data to subgraph
-    sub.add_nodes_from(d for d in fragment_graph.nodes(data=True) if d[0] in sub.nodes)
-    keys = set(i for i,_ in predicted_subsumtions)
-    return sub, {k: [l for j,l in predicted_subsumtions if j == k] for k in keys}
 
 def _build_node(ident, node, include_labels=True):
     d = dict(id=ident,
@@ -87,7 +72,7 @@ def batchify(l):
 
 class HierarchyAPI(Resource):
     def get(self):
-        return {r["ID"]: dict(label=r["LABEL"][0], children=r.get("SubClasses",[])) for r in LABEL_HIERARCHY}
+        return dict(enumerate(PREDICTION_HEADERS))
 
 
 class BatchPrediction(Resource):
@@ -139,22 +124,18 @@ class BatchPrediction(Resource):
         results = []
         if token_dicts:
             for batch in batchify(token_dicts):
-                dat = electra_model._process_batch(collater(batch), 0)
+                dat = electra_model._get_data_and_labels(collater(batch), 0)
                 result = electra_model(dat, **dat["model_kwargs"])
                 results += result["logits"].cpu().detach().tolist()
 
-            chebi, predicted_parents = get_relevant_chebi_fragment(np.stack(results, axis=0), smiles)
+            predicted_parents = get_relevant_chebi_fragment(np.stack(results, axis=0), smiles)
         else:
-            chebi, predicted_parents = ([], [])
-
+            predicted_parents = []
+        predicted_parents_for_sending = [(None if i in could_not_parse else predicted_parents[index_map[i]]) for i in range(len(smiles))]
         result = {
-            "predicted_parents": [(None if i in could_not_parse else predicted_parents[index_map[i]]) for i in range(len(smiles))],
-            "direct_parents": [(None if i in could_not_parse else list(chebi.successors(index_map[i]))) for i in range(len(smiles))],
-
+            "predicted_parents": predicted_parents_for_sending,
+            "direct_parents": predicted_parents_for_sending,
         }
-
-        if generate_ontology:
-            result["ontology"] = nx_to_graph(chebi)
 
         return result
 
@@ -202,8 +183,6 @@ class PredictionDetailApiHandler(Resource):
 
     def post(self):
         parser = reqparse.RequestParser()
-        plotter = AttentionMolPlot()
-        network_plotter = AttentionNetwork()
         parser.add_argument("type", type=str)
         parser.add_argument("smiles", type=str)
 
